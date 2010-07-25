@@ -3,13 +3,14 @@ import os
 import glob
 import platform
 
-SOURCES = glob.glob('*.c')
+SOURCES = glob.glob('src/GamePad/*.c') + ['src/main.c']
 
 env = Environment(ENV=os.environ)
 
 env['CC'] = "gcc"
 
 env.Append(CPPDEFINES="DEBUG")
+env.Append(CPPPATH='inc')
 env.Append(CCFLAGS = ['-ggdb', '-Wall' ])
 env.Append(LINKFLAGS = [ '-rdynamic' ])
 
