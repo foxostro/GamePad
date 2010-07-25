@@ -3,12 +3,11 @@ import os
 import glob
 import platform
 
-SOURCES = glob.glob('*.c') + glob.glob('*.cpp')
+SOURCES = glob.glob('*.c')
 
 env = Environment(ENV=os.environ)
 
 env['CC'] = "gcc"
-env['CXX'] = "g++"
 
 env.Append(CPPDEFINES="DEBUG")
 env.Append(CCFLAGS = ['-ggdb', '-Wall' ])

@@ -1,5 +1,7 @@
 /* vim:ts=4:sw=4
  *
+ * Enumerates, and provides access to, game pads on a Mac OS X system.
+ *
  */
 
 #include <CoreFoundation/CoreFoundation.h>
@@ -9,16 +11,12 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#include "GamePad.h"
+#include "GamePad_Private.h"
 
 
 
-/* state of the overall gamepad subsystem */
-struct _GamePad_State
-{
-	IOHIDManagerRef hidManagerRef;
-	CFMutableArrayRef devArrayRef;
-};
+
+#if 0 /* Leaving this in because I'll want it soon.*/
 
 
 
@@ -26,10 +24,10 @@ struct _GamePad_State
 static Boolean
 IOHIDDevice_GetLongProperty(IOHIDDeviceRef inIOHIDDeviceRef,
                             CFStringRef inKey,
-							long * outValue )
+							long * outValue)
 {
 	Boolean result = FALSE;
-	
+
 	if(inIOHIDDeviceRef) {
 		CFTypeRef tCFTypeRef = IOHIDDeviceGetProperty(inIOHIDDeviceRef, inKey);
 		if(tCFTypeRef && CFNumberGetTypeID() == CFGetTypeID(tCFTypeRef)) {
@@ -44,8 +42,8 @@ IOHIDDevice_GetLongProperty(IOHIDDeviceRef inIOHIDDeviceRef,
 
 
 
-static long
-IOHIDDevice_GetLocationID(IOHIDDeviceRef inIOHIDDeviceRef)
+/* get the LocationID from a device */
+static long IOHIDDevice_GetLocationID(IOHIDDeviceRef inIOHIDDeviceRef)
 {
 	long result = 0;
 	IOHIDDevice_GetLongProperty(inIOHIDDeviceRef,
@@ -56,40 +54,21 @@ IOHIDDevice_GetLocationID(IOHIDDeviceRef inIOHIDDeviceRef)
 
 
 
+#endif
 
-/* CFSetApplierFunction to copy the CFSet to a CFArray */
-static void
-CFSetApplierFunctionCopyToCFArray(const void * v, void * ctx)
+
+
+/* get the device serial number */
+static CFStringRef IOHIDDevice_GetSerialNumber(IOHIDDeviceRef inIOHIDDeviceRef)
 {
-	CFArrayAppendValue((CFMutableArrayRef)ctx, v);
-}
-
-
-
-/* CFSetApplierFunction to copy the CFSet to a CFArray */
-static CFComparisonResult
-CFDeviceArrayComparatorFunction(const void *val1,
-                                const void *val2,
-								void *context)
-{
-	CFComparisonResult result = kCFCompareEqualTo;
-	
-	long loc1 = IOHIDDevice_GetLocationID((IOHIDDeviceRef)val1);
-	long loc2 = IOHIDDevice_GetLocationID((IOHIDDeviceRef)val2);
-	
-	if(loc1 < loc2) {
-		result = kCFCompareLessThan;
-	} else if (loc1 > loc2) {
-		result = kCFCompareGreaterThan;
-	}
-	return result;
+	return IOHIDDeviceGetProperty(inIOHIDDeviceRef,
+	                              CFSTR(kIOHIDSerialNumberKey));
 }
 
 
 
 /* Creates a HID matching dictionary for GamePad devices. */
-static CFDictionaryRef
-createGamePadMatchingDictionary(void)
+static CFDictionaryRef CreateGamePadMatchingDictionary(void)
 {
 	CFMutableDictionaryRef theDict = NULL;
 	int usage = kHIDUsage_GD_GamePad;
@@ -116,30 +95,82 @@ createGamePadMatchingDictionary(void)
 
 
 
-/* Clears all fields in GamePad_State to their default values.
- * Performs no clean up for existing resources.
- */
-static void
-GamePad_State_Init(GamePad_State * state)
+void GamePad_Device_Clear(GamePad_Device * gamepad)
 {
-	assert(state);
-	state->hidManagerRef = NULL;
-	state->devArrayRef = NULL;
+	assert(gamepad);
+	gamepad->dev = NULL;
+	gamepad->uid = 0;
+	bzero(gamepad->sn, sizeof(gamepad->sn));
 }
 
 
 
-void
-GamePad_ScanForDevices(GamePad_State * state)
+GamePad_Device * GamePad_Device_Init(IOHIDDeviceRef dev)
+{
+	GamePad_Device * gamepad = NULL;
+	CFStringRef snRef = NULL;
+	
+	assert(dev);
+	
+	gamepad = (GamePad_Device *)malloc(sizeof(GamePad_Device));
+	GamePad_Device_Clear(gamepad);
+	
+	gamepad->dev = dev;
+
+	/* Grab some information about the gamepad from IOKit */
+	snRef = IOHIDDevice_GetSerialNumber(dev);
+	gamepad->uid = (uint32_t)CFHash(snRef);
+	CFStringGetCString(snRef, gamepad->sn, sizeof(gamepad->sn),
+	                   kCFStringEncodingMacRoman);
+
+	return gamepad;
+}
+
+
+
+void GamePad_Device_Destroy(GamePad_Device * gamepad)
+{
+	assert(gamepad);
+	assert(gamepad->dev);
+	CFRelease(gamepad->dev);
+	free(gamepad);
+}
+
+
+
+/* Clears all fields in GamePad_State to their default values.
+ * Performs no clean up for existing resources.
+ */
+void GamePad_State_Clear(GamePad_State * state)
+{
+	assert(state);
+	state->hidManagerRef = NULL;
+	state->gamepads = NULL;
+}
+
+
+
+/* CFSetApplierFunction to create gamepads and copy into a CFArray */
+static void CreateGamePadDeviceCopyToCFArray(const void * v, void * ctx)
+{
+	GamePad_Device * gamepad = NULL;
+	assert(v);
+	assert(ctx);
+	gamepad = GamePad_Device_Init((IOHIDDeviceRef)v);
+	CFArrayAppendValue((CFMutableArrayRef)ctx, gamepad);
+}
+
+
+
+void GamePad_ScanForDevices(GamePad_State * state)
 {
 	CFDictionaryRef matchingDict = NULL;
 	CFSetRef devCFSetRef = NULL;
-	CFIndex cnt = 0;
 
 	assert(state);
 	
 	/* Enumerate HID devices that are gamepads */
-	matchingDict = createGamePadMatchingDictionary();
+	matchingDict = CreateGamePadMatchingDictionary();
 	IOHIDManagerSetDeviceMatching(state->hidManagerRef, matchingDict);
 	CFRelease(matchingDict);
 
@@ -150,29 +181,24 @@ GamePad_ScanForDevices(GamePad_State * state)
 		exit(EXIT_FAILURE);
 	}
 
-	state->devArrayRef = CFArrayCreateMutable(kCFAllocatorDefault, 0,
-									          &kCFTypeArrayCallBacks);
+	/* Create an array of gamepad objects */
+	state->gamepads = CFArrayCreateMutable(kCFAllocatorDefault, 0, NULL);
 	CFSetApplyFunction(devCFSetRef,
-	                   CFSetApplierFunctionCopyToCFArray,
-					   state->devArrayRef);
-	cnt = CFArrayGetCount(state->devArrayRef);
-	CFArraySortValues(state->devArrayRef,
-	                  CFRangeMake(0, cnt),
-					  CFDeviceArrayComparatorFunction,
-					  NULL);
+	                   CreateGamePadDeviceCopyToCFArray,
+					   state->gamepads);
+	
 	CFRelease(devCFSetRef);
 }
 
 
 
-GamePad_State *
-GamePad_Init(void)
+GamePad_State * GamePad_Init(void)
 {
 	GamePad_State * state = NULL;
 	IOReturn r = 0;
 	
 	state = (GamePad_State *)malloc(sizeof(GamePad_State));
-	GamePad_State_Init(state);
+	GamePad_State_Clear(state);
 
 	/* initialize the HID manager */
 	state->hidManagerRef = IOHIDManagerCreate(kCFAllocatorDefault, 0);
@@ -197,15 +223,25 @@ GamePad_Init(void)
 
 
 
-void
-GamePad_Destroy(GamePad_State * state)
+void GamePad_Destroy(GamePad_State * state)
 {
+	CFIndex i = 0, cnt = 0;
 	IOReturn r = 0;
 
 	assert(state);
+	assert(state->gamepads);
 
-	CFRelease(state->devArrayRef);
+	/* free all gamepads */
+	cnt = CFArrayGetCount(state->gamepads);
+	for(i = 0; i < cnt; i++)
+	{
+		GamePad_Device * gamepad = NULL;
+		gamepad = (GamePad_Device *)CFArrayGetValueAtIndex(state->gamepads,i);
+		GamePad_Device_Destroy(gamepad);
+	}
+	CFRelease(state->gamepads);
 
+	/* Close the HID manager */
 	r = IOHIDManagerClose(state->hidManagerRef, 0);
 	if(kIOReturnSuccess != r) {
 		fprintf(stderr, "%s: Couldn’t close IOHIDManager.\n",
@@ -213,36 +249,39 @@ GamePad_Destroy(GamePad_State * state)
 		exit(EXIT_FAILURE);
 	}
 
+	/* Release storage used for subsystem state */
 	free(state);
 }
 
 
 
-void
-GamePad_DEBUG_DumpDevices(GamePad_State * state)
+void GamePad_DEBUG_DumpDevice(GamePad_Device * gamepad)
 {
-	CFIndex idx = 0, cnt = 0;
+	assert(gamepad);
+	
+	printf("Device %p:\n{\n", gamepad->dev);
+	printf("\tUID: 0x%X\n", gamepad->uid);
+	printf("\tSerial Number: %s\n", gamepad->sn);
+	printf("}\n\n");
+	fflush(stdout);
+}
+
+
+
+void GamePad_DEBUG_DumpDevices(GamePad_State * state)
+{
+	CFIndex i = 0, cnt = 0;
 
 	assert(state);
-	assert(state->devArrayRef);
+	assert(state->gamepads);
 
 	/* iterate across devices and print some information on each one */
-	cnt = CFArrayGetCount(state->devArrayRef);
-	for(idx = 0; idx < cnt; idx++)
+	cnt = CFArrayGetCount(state->gamepads);
+	for(i = 0; i < cnt; i++)
 	{
-		IOHIDDeviceRef hidDeviceRef;
-
-		hidDeviceRef = (IOHIDDeviceRef)CFArrayGetValueAtIndex(state->devArrayRef, idx);
-
-		if(!hidDeviceRef) {
-			continue;
-		}
-
-		printf("%s: dev[%ld]: %p\n",
-				__PRETTY_FUNCTION__,
-				idx,
-				hidDeviceRef);
-		fflush(stdout);
+		GamePad_Device * gamepad = NULL;
+		gamepad = (GamePad_Device *)CFArrayGetValueAtIndex(state->gamepads, i);
+		GamePad_DEBUG_DumpDevice(gamepad);
 	}
 }
 
