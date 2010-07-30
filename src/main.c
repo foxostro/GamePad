@@ -6,18 +6,17 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#include "GamePad.h"
+#include <GamePad.h>
 
 
 
 int main(int argc, const char * argv[])
 {
 	GamePad_State * gamepad_state = NULL;
-
 	gamepad_state = GamePad_Init();
+	printf("Printing out all connected game pads:\n\n");
 	GamePad_DEBUG_DumpDevices(gamepad_state);
 	GamePad_Destroy(gamepad_state);
-	
 	return EXIT_SUCCESS;
 }
 

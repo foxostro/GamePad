@@ -169,6 +169,9 @@ void GamePad_ScanForDevices(GamePad_State * state)
 
 	assert(state);
 	
+	/* Create an array of gamepad objects */
+	state->gamepads = CFArrayCreateMutable(kCFAllocatorDefault, 0, NULL);
+	
 	/* Enumerate HID devices that are gamepads */
 	matchingDict = CreateGamePadMatchingDictionary();
 	IOHIDManagerSetDeviceMatching(state->hidManagerRef, matchingDict);
@@ -177,12 +180,10 @@ void GamePad_ScanForDevices(GamePad_State * state)
 	/* Copy all game pad device references into an array */
 	devCFSetRef = IOHIDManagerCopyDevices(state->hidManagerRef);
 	if(!devCFSetRef) {
-		fprintf(stderr, "%s: Couldn't copy devices.\n", __PRETTY_FUNCTION__);
-		exit(EXIT_FAILURE);
+		return; /* There are no gamepads available. */
 	}
 
-	/* Create an array of gamepad objects */
-	state->gamepads = CFArrayCreateMutable(kCFAllocatorDefault, 0, NULL);
+	/* Populate that array with the gamepads on the system. */
 	CFSetApplyFunction(devCFSetRef,
 	                   CreateGamePadDeviceCopyToCFArray,
 					   state->gamepads);

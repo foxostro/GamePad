@@ -7,6 +7,7 @@ SOURCES = glob.glob('src/GamePad/*.c') + ['src/main.c']
 
 env = Environment(ENV=os.environ)
 
+# The compiler options below were chosen for use with gcc, so make sure to build with gcc.
 env['CC'] = "gcc"
 
 env.Append(CPPDEFINES="DEBUG")
